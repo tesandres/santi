@@ -1,0 +1,273 @@
+https://github.com/tesandres/ORGANIZADOR.git<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SANTI - Calendario Interactivo</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(to bottom right, #1b1c1f, #282a36);
+      color: white;
+      padding: 20px;
+    }
+    .titulo {
+      position: fixed;
+      top: 10px;
+      left: 20px;
+      font-size: 64px;
+      color: rgba(255,255,255,0.05);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .hora-actual {
+      text-align: right;
+      font-size: 14px;
+      color: #ccc;
+      margin-bottom: 10px;
+      position: relative;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 5px;
+    }
+    .card {
+      backdrop-filter: blur(3px);
+      border-radius: 1rem;
+      padding: 6px;
+      font-size: 10px;
+      overflow: hidden;
+    }
+    .card h3 {
+      margin: 0;
+      font-size: 12px;
+      pointer-events: none;
+    }
+    .card input, .card textarea {
+      width: 100%;
+      margin-bottom: 2px;
+      padding: 2px;
+      background: #222;
+      border: none;
+      border-radius: 2px;
+      color: white;
+      font-size: 10px;
+    }
+    .card input::placeholder, .card textarea::placeholder {
+      color: #888;
+    }
+    .resumen-btn, .exportar-btn-round, .exportar-eventos-btn {
+      position: relative;
+      width: 20px;
+      height: 20px;
+      border: none;
+      border-radius: 50%;
+      color: white;
+      font-weight: bold;
+      font-size: 10px;
+      cursor: pointer;
+      margin-left: 5px;
+    }
+    .resumen-btn {
+      background: #5a5cf3;
+      box-shadow: 0 0 5px #5a5cf3;
+    }
+    .exportar-btn-round {
+      background: #f87171;
+      box-shadow: 0 0 5px #f87171;
+    }
+    .exportar-eventos-btn {
+      background: #facc15;
+      box-shadow: 0 0 5px #facc15;
+    }
+    .resumen-box {
+      display: none;
+      margin-top: 20px;
+      text-align: center;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 10px;
+      border-radius: 10px;
+    }
+    canvas {
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="titulo">SANTI</div>
+  <div class="hora-actual" id="horaActual">
+    <span id="reloj"></span>
+    <button class="resumen-btn" id="btnResumen" onclick="mostrarResumen()">R</button>
+    <button class="exportar-btn-round" onclick="exportarResumen()">E</button>
+    <button class="exportar-eventos-btn" onclick="exportarEventos()">Y</button>
+  </div>
+  <div class="grid" id="calendario"></div>
+  <div id="resumenDia" class="resumen-box">
+    <button onclick="cerrarResumen()" style="float:right;color:white">✕</button>
+    <canvas id="chartResumen"></canvas>
+  </div>
+
+  <script>
+    const coloresSuaves = [
+      '#f28b82', '#fbbc04', '#fff475', '#ccff90', '#a7ffeb', '#cbf0f8', '#aecbfa', '#d7aefb', '#fdcfe8', '#e6c9a8', '#e8eaed', '#bcdff1', '#f3b1e3', '#b8f3b1', '#e4f3b1', '#b1f3f0', '#f3d1b1', '#f3b1b8', '#b1baf3', '#d1b1f3', '#f3b1e3', '#b1f3cb', '#f3ebb1', '#c0f3b1', '#b1f3d4', '#f3b1a6', '#f3b1dd', '#c4b1f3', '#b1e3f3', '#f3b1c7', '#b1f3e8'
+    ];
+
+    const calendario = document.getElementById('calendario');
+    const resumenDia = document.getElementById('resumenDia');
+    const reloj = document.getElementById('reloj');
+    const chartCanvas = document.getElementById('chartResumen');
+    let chartInstance = null;
+    let resumenTimeout = null;
+
+    function actualizarHora() {
+      const now = new Date();
+      reloj.textContent = now.toLocaleString() + ' ';
+    }
+    setInterval(actualizarHora, 1000);
+    actualizarHora();
+
+    const hoy = new Date();
+    const mes = hoy.getMonth();
+    const anio = hoy.getFullYear();
+    const diasMes = new Date(anio, mes + 1, 0).getDate();
+
+    let datos = JSON.parse(localStorage.getItem('datosCalendario')) || Array.from({ length: diasMes }, (_, i) => ({
+      dia: i + 1,
+      peso: "",
+      sueno: "",
+      ritmo: "",
+      pasos: "",
+      eventos: ""
+    }));
+
+    function guardarDatos() {
+      localStorage.setItem('datosCalendario', JSON.stringify(datos));
+    }
+
+    function crearCalendario() {
+      calendario.innerHTML = '';
+      datos.forEach((diaData, i) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.style.backgroundColor = coloresSuaves[i % coloresSuaves.length];
+
+        const titulo = document.createElement('h3');
+        titulo.textContent = `Día ${diaData.dia}`;
+        card.appendChild(titulo);
+
+        ['peso', 'sueno', 'ritmo', 'pasos'].forEach(key => {
+          const input = document.createElement('input');
+          input.placeholder = key.charAt(0).toUpperCase() + key.slice(1);
+          input.value = diaData[key];
+          input.oninput = (e) => {
+            datos[i][key] = e.target.value;
+            guardarDatos();
+          };
+          card.appendChild(input);
+        });
+
+        const eventosBtn = document.createElement('button');
+        eventosBtn.textContent = "Eventos";
+        eventosBtn.onclick = () => {
+          const texto = prompt("Escribe eventos para el día " + (i + 1), diaData.eventos);
+          if (texto !== null) {
+            datos[i].eventos = texto;
+            guardarDatos();
+          }
+        };
+        card.appendChild(eventosBtn);
+
+        calendario.appendChild(card);
+      });
+    }
+
+    function mostrarResumen() {
+      const dia = prompt(`¿Qué día quieres ver? (1-${diasMes})`);
+      if (!dia || dia < 1 || dia > diasMes) return;
+      resumenDia.style.display = 'block';
+
+      if (resumenTimeout) clearTimeout(resumenTimeout);
+      resumenTimeout = setTimeout(() => {
+        cerrarResumen();
+      }, 5000);
+
+      const d = datos[dia - 1];
+      const valores = [parseFloat(d.peso) || 0, parseFloat(d.sueno) || 0, parseFloat(d.ritmo) || 0, parseFloat(d.pasos) || 0];
+      const etiquetas = ["Peso", "Sueño (h)", "Ritmo", "Pasos"];
+
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(chartCanvas, {
+        type: 'bar',
+        data: {
+          labels: etiquetas,
+          datasets: [{
+            label: `Resumen Día ${d.dia}`,
+            data: valores,
+            backgroundColor: ['#f87171', '#60a5fa', '#34d399', '#fbbf24'],
+            borderColor: '#1f2937',
+            borderWidth: 2,
+            borderSkipped: false
+          }]
+        },
+        options: {
+          responsive: true,
+          animation: {
+            duration: 1500,
+            easing: 'easeOutBounce'
+          },
+          plugins: {
+            legend: { labels: { color: '#fff' } },
+            tooltip: { enabled: true }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#fff' },
+              grid: { color: '#333' }
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#fff' },
+              grid: { color: '#333' }
+            }
+          }
+        }
+      });
+    }
+
+    function cerrarResumen() {
+      resumenDia.style.display = 'none';
+      if (resumenTimeout) clearTimeout(resumenTimeout);
+    }
+
+    function exportarResumen() {
+      if (!chartInstance) return;
+      const enlace = document.createElement('a');
+      enlace.download = 'resumen-dia.png';
+      enlace.href = chartCanvas.toDataURL();
+      enlace.click();
+    }
+
+    function exportarEventos() {
+      let contenido = "Día,Eventos\n";
+      datos.forEach(d => {
+        contenido += `${d.dia},"${d.eventos.replace(/"/g, '""')}"\n`;
+      });
+      const blob = new Blob([contenido], { type: 'text/csv;charset=utf-8;' });
+      const enlace = document.createElement('a');
+      enlace.href = URL.createObjectURL(blob);
+      enlace.download = 'eventos.csv';
+      enlace.click();
+    }
+
+    crearCalendario();
+  </script>
+</body>
+</html>
